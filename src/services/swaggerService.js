@@ -71,33 +71,48 @@ async function processSwaggerData(swaggerUrl, userId, total_requests, threads) {
     for (const endpoint of swaggerData.endpoints) {
       const pathDetails = swaggerData.paths?.[endpoint.path];
       
+      // Get request body and field info
+      let requestBody = null;
+      let requestFieldInfo = null;
+      
+      if (endpoint.requestBody) {
+        try {
+          const content = endpoint.requestBody.content || {};
+          const jsonContent = content['application/json'] || Object.values(content)[0];
+          
+          if (jsonContent && jsonContent.schema) {
+            const schema = jsonContent.schema;
+            const result = createSchemaBasedRequestBody(schema, swaggerData.definitions);
+            requestBody = JSON.stringify(result.dummyData);
+            requestFieldInfo = result.fieldInfo;
+          }
+        } catch (error) {
+          console.error("Error processing request body schema:", error);
+          requestBody = null;
+          requestFieldInfo = null;
+        }
+      }
+      
       // Process the endpoint
       const processedEndpoint = {
         method: endpoint.method,
         full_path: `${baseUrl}${createPathWithParams(endpoint.path, endpoint.parameters)}`,
         summary: endpoint.summary || "",
-        request_body: createDummyRequestBody(endpoint, swaggerData.definitions),
+        request_body: requestBody,
+        request_field_info: requestFieldInfo ? JSON.stringify(requestFieldInfo) : null,
         request_headers: JSON.stringify({
           "Content-Type": "application/json",
           Authorization: "Bearer dummy_token",
         }),
       };
 
-      // const savedEndpoint = await databaseService.saveApiEndpoint({
-      //   ...processedEndpoint,
-      //   user_id: userId,
-      //   load_status: true,
-      //   total_requests: total_requests,
-      //   threads: threads
-      // });
-
-      const savedEndpoint = {
+      const savedEndpoint = await databaseService.saveApiEndpoint({
         ...processedEndpoint,
         user_id: userId,
         load_status: true,
         total_requests: total_requests,
         threads: threads
-      };
+      });
 
       processedEndpoints.push(savedEndpoint);
     }
@@ -176,9 +191,9 @@ function createDummyRequestBody(endpoint, definitions = {}) {
     // Extract schema
     const schema = jsonContent.schema;
     
-    // Create dummy data based on schema
-    const dummyData = createDummyDataFromSchema(schema, definitions);
-    return JSON.stringify(dummyData);
+    // Create dummy data and field info based on schema
+    const result = createSchemaBasedRequestBody(schema, definitions);
+    return JSON.stringify(result.dummyData);
   } catch (error) {
     console.error("Error creating dummy request body:", error);
     return JSON.stringify({ dummy_data: "value" });
@@ -186,62 +201,154 @@ function createDummyRequestBody(endpoint, definitions = {}) {
 }
 
 /**
- * Recursively create dummy data from schema
+  * Process schema to extract both dummy data and field metadata
  */
-function createDummyDataFromSchema(schema, definitions = {}, visited = new Set()) {
+function createSchemaBasedRequestBody(schema, definitions = {}) {
+  // Extract the schema fields and create dummy data
+  const { dummyData, fieldInfo } = createDummyDataFromSchema(schema, definitions);
+  
+  return { 
+    dummyData,
+    fieldInfo
+  };
+}
+
+/**
+ * Recursively create dummy data from schema while tracking required/optional fields
+ */
+function createDummyDataFromSchema(schema, definitions = {}, visited = new Set(), path = '') {
   // Handle reference to another schema
   if (schema.$ref) {
     const refName = schema.$ref.split('/').pop();
     
     // Prevent infinite recursion
     if (visited.has(refName)) {
-      return { dummy_reference: refName };
+      return { 
+        dummyData: { dummy_reference: refName },
+        fieldInfo: { type: 'reference', required: false, path: path }
+      };
     }
     
     visited.add(refName);
     const refSchema = definitions[refName];
     
     if (refSchema) {
-      return createDummyDataFromSchema(refSchema, definitions, visited);
+      const result = createDummyDataFromSchema(refSchema, definitions, visited, path);
+      result.fieldInfo.referenceName = refName;
+      return result;
     }
-    return { dummy_reference: refName };
+    
+    return { 
+      dummyData: { dummy_reference: refName },
+      fieldInfo: { type: 'reference', referenceName: refName, required: false, path: path }
+    };
   }
   
   // Handle different schema types
   switch (schema.type) {
-    case 'object':
+    case 'object': {
       const properties = schema.properties || {};
-      const result = {};
+      const required = schema.required || [];
+      const dummyData = {};
+      const fieldInfo = {
+        type: 'object',
+        required: false,
+        path: path,
+        properties: {}
+      };
       
       for (const [key, propSchema] of Object.entries(properties)) {
-        result[key] = createDummyDataFromSchema(propSchema, definitions, visited);
+        const isRequired = required.includes(key);
+        const newPath = path ? `${path}.${key}` : key;
+        const result = createDummyDataFromSchema(propSchema, definitions, visited, newPath);
+        
+        dummyData[key] = result.dummyData;
+        fieldInfo.properties[key] = {
+          ...result.fieldInfo,
+          required: isRequired
+        };
       }
       
-      return result;
+      return { dummyData, fieldInfo };
+    }
       
-    case 'array':
+    case 'array': {
+      let itemResult = { dummyData: "dummy_array_item", fieldInfo: { type: 'unknown' } };
+      
       if (schema.items) {
-        // Just return a single item array for simplicity
-        return [createDummyDataFromSchema(schema.items, definitions, visited)];
+        // Just get the structure of a single item
+        itemResult = createDummyDataFromSchema(
+          schema.items, 
+          definitions, 
+          visited, 
+          path ? `${path}[]` : '[]'
+        );
       }
-      return ["dummy_array_item"];
       
-    case 'string':
-      return schema.format === 'date-time' ? new Date().toISOString() :
-        schema.format === 'date' ? new Date().toISOString().split('T')[0] :
-        schema.format === 'email' ? "user@example.com" :
-        schema.format === 'uuid' ? "00000000-0000-0000-0000-000000000000" :
-        schema.enum ? schema.enum[0] : "dummy_string";
+      return { 
+        dummyData: [itemResult.dummyData],
+        fieldInfo: { 
+          type: 'array',
+          required: false,
+          path: path,
+          items: itemResult.fieldInfo
+        }
+      };
+    }
+      
+    case 'string': {
+      let value = "dummy_string";
+      if (schema.format === 'date-time') value = new Date().toISOString();
+      else if (schema.format === 'date') value = new Date().toISOString().split('T')[0];
+      else if (schema.format === 'email') value = "user@example.com";
+      else if (schema.format === 'uuid') value = "00000000-0000-0000-0000-000000000000";
+      else if (schema.enum && schema.enum.length > 0) value = schema.enum[0];
+      
+      return { 
+        dummyData: value,
+        fieldInfo: { 
+          type: 'string',
+          format: schema.format || 'text',
+          enum: schema.enum,
+          required: false,
+          path: path
+        }
+      };
+    }
       
     case 'integer':
     case 'number':
-      return 0;
+      return { 
+        dummyData: 0,
+        fieldInfo: { 
+          type: schema.type,
+          format: schema.format,
+          minimum: schema.minimum,
+          maximum: schema.maximum,
+          required: false,
+          path: path
+        }
+      };
       
     case 'boolean':
-      return false;
+      return { 
+        dummyData: false,
+        fieldInfo: { 
+          type: 'boolean',
+          required: false,
+          path: path
+        }
+      };
       
     default:
-      return "dummy_value";
+      return { 
+        dummyData: "dummy_value",
+        fieldInfo: { 
+          type: schema.type || 'unknown',
+          required: false,
+          path: path
+        }
+      };
   }
 }
 
@@ -250,3 +357,4 @@ export const swaggerService = {
   getSwaggerData,
   processSwaggerData,
 };
+

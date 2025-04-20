@@ -28,6 +28,7 @@ model ApiEndpoint {
   full_path       String
   summary         String?
   request_body    String?
+  request_field_info String?
   request_headers Json?
   total_requests  Int      @default(0)
   threads         Int      @default(1)
