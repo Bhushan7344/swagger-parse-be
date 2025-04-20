@@ -1,0 +1,27 @@
+{
+  "name": "swagger",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "nodemon index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "@prisma/client": "^6.6.0",
+    "axios": "^1.8.4",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9",
+    "prisma": "^6.6.0"
+  }
+}

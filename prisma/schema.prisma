@@ -1,0 +1,41 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int           @id @default(autoincrement())
+  user_id   String        @unique
+  name      String
+  email     String        @unique
+  phone     String?
+  endpoints ApiEndpoint[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@map("users")
+}
+
+model ApiEndpoint {
+  id              Int      @id @default(autoincrement())
+  method          String
+  full_path       String
+  summary         String?
+  request_body    String?
+  request_headers Json?
+  total_requests  Int      @default(0)
+  threads         Int      @default(1)
+  load_status     Boolean  @default(false)
+  user            User     @relation(fields: [user_id], references: [user_id])
+  user_id         String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("api_endpoints")
+}
