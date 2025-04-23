@@ -11,7 +11,6 @@ datasource db {
 
 model User {
   id        Int           @id @default(autoincrement())
-  user_id   String        @unique
   name      String
   email     String        @unique
   phone     String?
@@ -27,16 +26,34 @@ model ApiEndpoint {
   method          String
   full_path       String
   summary         String?
-  request_body    String?
-  request_field_info String?
+  request_body    Json?
   request_headers Json?
   total_requests  Int      @default(0)
   threads         Int      @default(1)
-  load_status     Boolean  @default(false)
-  user            User     @relation(fields: [user_id], references: [user_id])
-  user_id         String
+  load_status     String  @default("pending")
+  user            User     @relation(fields: [user_id], references: [id])
+  user_id         Int
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@map("api_endpoints")
+}
+
+model LoadTestResult {
+  id             Int      @id @default(autoincrement())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  api_endpoint_id  Int
+
+  total_requests  Int
+  success_count   Int
+  error_count     Int
+  avg_latency_ms   Float
+  duration       BigInt
+  rps            Float
+  fastest_ms      Int
+  slowest_ms      Int
+  status_code     Json
+
+  @@map("load_test_results")
 }

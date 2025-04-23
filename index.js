@@ -2,11 +2,12 @@ import express from "express";
 import dotenv from "dotenv";
 import swaggerRoutes from "./src/routes/swaggerRoutes.js";
 import userRoutes from "./src/routes/userRoutes.js";
-
+import cors from 'cors';
 // Load environment variables
 dotenv.config();
 
 const app = express();
+app.use(cors('*'));
 const PORT = process.env.PORT || 3000;
 
 // Middleware
